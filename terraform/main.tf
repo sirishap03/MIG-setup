@@ -4,11 +4,13 @@ provider "google" {
   zone    = var.zone
 }
 
-# -------------------------
-# Create 2 Standalone VMs
-# -------------------------
-resource "google_compute_instance" "vm_instance_1" {
-  name         = "general-vm-1"
+data "local_file" "ssh_key" {
+  filename = var.ssh_pub_key_path
+}
+
+resource "google_compute_instance" "general_vm" {
+  count        = 2
+  name         = "general-vm-${count.index + 1}"
   machine_type = "e2-medium"
   zone         = var.zone
 
@@ -23,34 +25,17 @@ resource "google_compute_instance" "vm_instance_1" {
     access_config {}
   }
 
-  tags = ["general"]
-}
-
-resource "google_compute_instance" "vm_instance_2" {
-  name         = "general-vm-2"
-  machine_type = "e2-medium"
-  zone         = var.zone
-
-  boot_disk {
-    initialize_params {
-      image = "debian-cloud/debian-11"
-    }
-  }
-
-  network_interface {
-    network       = "default"
-    access_config {}
+  metadata = {
+    ssh-keys = "${var.ssh_user}:${data.local_file.ssh_key.content}"
+    enable-oslogin = "FALSE"
   }
 
   tags = ["general"]
 }
 
-# -------------------------
-# Instance Template for MIG (NO startup script)
-# -------------------------
 resource "google_compute_instance_template" "mig_template" {
-  name_prefix   = "mig-template"
-  machine_type  = "e2-medium"
+  name_prefix  = "mig-template"
+  machine_type = "e2-medium"
 
   disk {
     auto_delete  = true
@@ -63,16 +48,18 @@ resource "google_compute_instance_template" "mig_template" {
     access_config {}
   }
 
+  metadata = {
+    ssh-keys = "${var.ssh_user}:${data.local_file.ssh_key.content}"
+    enable-oslogin = "FALSE"
+  }
+
   tags = ["mig"]
 }
 
-# -------------------------
-# MIG with 5 Instances
-# -------------------------
 resource "google_compute_region_instance_group_manager" "mig" {
   name               = "web-mig"
   region             = var.region
-  base_instance_name = "mig-vm"
+  base_instance_name = "mig-instance"
   target_size        = 5
 
   version {
@@ -80,11 +67,8 @@ resource "google_compute_region_instance_group_manager" "mig" {
   }
 }
 
-# -------------------------
-# Allow SSH and HTTP (for later Apache)
-# -------------------------
-resource "google_compute_firewall" "allow_http_ssh" {
-  name    = "allow-http-ssh"
+resource "google_compute_firewall" "allow_ssh_http" {
+  name    = "allow-ssh-http"
   network = "default"
 
   allow {
