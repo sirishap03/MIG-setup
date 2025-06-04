@@ -1,80 +1,61 @@
 provider "google" {
-  project = var.project_id
-  region  = var.region
-  zone    = var.zone
+  project = "copper-cider-453013-b7"
+  zone    = "us-central1-a"
 }
 
-data "local_file" "ssh_key" {
-  filename = var.ssh_pub_key_path
-}
 
-resource "google_compute_instance" "general_vm" {
-  count        = 2
-  name         = "general-vm-${count.index + 1}"
-  machine_type = "e2-medium"
-  zone         = var.zone
-
-  boot_disk {
-    initialize_params {
-      image = "debian-cloud/debian-11"
-    }
-  }
-
-  network_interface {
-    network       = "default"
-    access_config {}
-  }
-
-  metadata = {
-    ssh-keys = "${var.ssh_user}:${data.local_file.ssh_key.content}"
-    enable-oslogin = "FALSE"
-  }
-
-  tags = ["general"]
-}
-
-resource "google_compute_instance_template" "mig_template" {
-  name_prefix  = "mig-template"
-  machine_type = "e2-medium"
+resource "google_compute_instance_template" "temp1" {
+  name         = "template1"
+  machine_type = "e2-standard-2"
 
   disk {
     auto_delete  = true
     boot         = true
-    source_image = "debian-cloud/debian-11"
+    source_image = "centos-cloud/centos-stream-9"
   }
 
   network_interface {
-    network       = "default"
+    network = "default"
+
+    # Adding access_config to assign an external IP
     access_config {}
   }
 
-  metadata = {
-    ssh-keys = "${var.ssh_user}:${data.local_file.ssh_key.content}"
-    enable-oslogin = "FALSE"
-  }
-
-  tags = ["mig"]
+ metadata = {
+  enable-oslogin = "TRUE"
 }
 
-resource "google_compute_region_instance_group_manager" "mig" {
-  name               = "web-mig"
-  region             = var.region
-  base_instance_name = "mig-instance"
-  target_size        = 5
+
+  tags = ["harnessvms"]
+}
+
+resource "google_compute_health_check" "health" {
+  name = "health1"
+
+  http_health_check {
+    port         = 80
+    request_path = "/"
+  }
+
+  healthy_threshold   = 2
+  unhealthy_threshold = 2
+  timeout_sec         = 5
+  check_interval_sec  = 10
+}
+
+resource "google_compute_instance_group_manager" "manager" {
+  name               = "instance-manager-1"
+  base_instance_name = "okay"
+  zone               = "us-central1-a"
 
   version {
-    instance_template = google_compute_instance_template.mig_template.id
-  }
-}
-
-resource "google_compute_firewall" "allow_ssh_http" {
-  name    = "allow-ssh-http"
-  network = "default"
-
-  allow {
-    protocol = "tcp"
-    ports    = ["22", "80"]
+    instance_template = google_compute_instance_template.temp1.self_link
   }
 
-  target_tags = ["general", "mig"]
+  target_size = 2
+
+  auto_healing_policies {
+    health_check      = google_compute_health_check.health.self_link
+    initial_delay_sec = 300
+  }
 }
